@@ -15,21 +15,27 @@
 ---
 
 ## 📌 Daftar Isi
-- [Latar Belakang Proyek](#-latar-belakang-proyek)
-- [Fitur Utama Sistem](#-fitur-utama-sistem)
-- [Struktur Folder Proyek IoT](#-struktur-folder-proyek-iot)
-- [Spesifikasi Perangkat Keras & Wiring](#-spesifikasi-perangkat-keras--wiring)
-- [Status Output & Logika Indikator (OLED & LED)](#-status-output--logika-indikator-oled--led)
-  - [1. Splash Screen & Self-Test (Pengetesan Awal)](#1-splash-screen--self-test-pengetesan-awal-oled--led)
+- [🌊 Latar Belakang Proyek](#-latar-belakang-proyek)
+- [✨ Fitur Utama Sistem](#-fitur-utama-sistem)
+- [📂 Struktur Folder Proyek IoT (Arsitektur OOP Modular)](#-struktur-folder-proyek-iot-arsitektur-oop-modular)
+  - [Penjelasan Arsitektur Class OOP](#penjelasan-arsitektur-class-oop)
+- [🛠️ Spesifikasi Perangkat Keras & Wiring](#-spesifikasi-perangkat-keras--wiring)
+  - [1. Daftar Komponen](#1-daftar-komponen)
+  - [2. Tabel Pinout Wiring](#2-tabel-pinout-wiring)
+  - [3. Diagram Skematik Sirkuit (ASCII Art)](#3-diagram-skematik-sirkuit-ascii-art)
+- [📊 Status Output & Logika Indikator (OLED & LED)](#-status-output--logika-indikator-oled--led)
+  - [1. Splash Screen & Self-Test (Pengetesan Awal OLED & LED)](#1-splash-screen--self-test-pengetesan-awal-oled--led)
   - [2. Status Normal (Aman)](#2-status-normal-aman)
   - [3. Status Constant Jamming (Bahaya)](#3-status-constant-jamming-bahaya)
   - [4. Status Periodic Jamming (Waspada)](#4-status-periodic-jamming-waspada)
-- [Protokol Komunikasi Data Serial](#-protokol-komunikasi-data-serial)
-- [Panduan Instalasi & Menjalankan](#-panduan-instalasi--menjalankan)
+- [📡 Protokol Komunikasi Data Serial](#-protokol-komunikasi-data-serial)
+  - [Tabel Daftar Perintah](#tabel-daftar-perintah)
+- [🚀 Panduan Instalasi & Menjalankan](#-panduan-instalasi--menjalankan)
   - [Opsi A: Menggunakan PlatformIO (VS Code) - Direkomendasikan](#opsi-a-menggunakan-platformio-vscode---direkomendasikan)
   - [Opsi B: Menggunakan Arduino IDE](#opsi-b-menggunakan-arduino-ide)
-- [Pengujian & Simulasi Serial](#-pengujian--simulasi-serial)
-- [Identitas Proyek & Tim](#-identitas-proyek--tim)
+- [🧪 Pengujian & Simulasi Serial](#-pengujian--simulasi-serial)
+- [👥 Identitas Proyek & Tim](#-identitas-proyek--tim)
+- [📄 Lisensi](#-lisensi)
 
 ---
 
