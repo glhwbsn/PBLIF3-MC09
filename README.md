@@ -63,7 +63,7 @@ Perangkat ini dirancang sebagai **unit visualizer portabel mandiri berbasis ESP3
 
 ---
 
-## 📂 Struktur Folder Proyek IoT
+## 📂 Struktur Folder Proyek IoT (Arsitektur OOP Modular)
 
 Struktur direktori firmware dan modul pendukung pada path lokal:  
 `D:\3312511092\SEM III\IF316 - Mata Kuliah Pilihan 1 IoT\!Proyek\PBLIF3-MC09`
@@ -74,12 +74,22 @@ PBLIF3-MC09/
 ├── platformio.ini                 # Konfigurasi PlatformIO (board, baudrate, lib_deps)
 ├── README.md                      # Dokumentasi komprehensif proyek GitHub
 │
-├── include/                       # Header file & konfigurasi global
+├── include/                       # Header file (.h) - Deklarasi Class & Konfigurasi
 │   ├── README                     # Informasi direktori include PlatformIO
-│   └── config.h                   # Definisi pin hardware, baudrate, konstanta timing & enum state
+│   ├── config.h                   # Definisi pin hardware, baudrate, konstanta timing & enum state
+│   ├── LedController.h            # Header Class LedController (pengendali 3 LED)
+│   ├── SplashScreen.h             # Header Class SplashScreen (tampilan awal boot)
+│   ├── NormalStatus.h             # Header Class NormalStatus ("Status: Aman")
+│   ├── ConstantJammingStatus.h    # Header Class ConstantJammingStatus ("PERINGATAN: Constant Jamming")
+│   └── PeriodicJammingStatus.h    # Header Class PeriodicJammingStatus ("PERINGATAN: Periodic Jamming")
 │
-├── src/                           # Source code firmware utama
-│   └── main.cpp                   # Firmware ESP32 (State machine, OLED render, LED control, Serial parser)
+├── src/                           # Source code (.cpp) - Implementasi Logika Class & Main
+│   ├── LedController.cpp          # Implementasi fungsi LED (Self-test, Normal, Jamming, Non-blocking blink)
+│   ├── SplashScreen.cpp           # Implementasi tampilan grafis boot & identitas sistem
+│   ├── NormalStatus.cpp           # Implementasi tampilan OLED status Normal
+│   ├── ConstantJammingStatus.cpp  # Implementasi tampilan OLED status Constant Jamming
+│   ├── PeriodicJammingStatus.cpp  # Implementasi tampilan OLED status Periodic Jamming
+│   └── main.cpp                   # Main program (Orkestrator: inisialisasi class, serial parser, state router)
 │
 ├── tools/                         # Skrip utilitas pengujian & simulasi
 │   └── simulate_pi.py             # Simulator serial Python (simulasi output Raspberry Pi -> ESP32)
@@ -91,13 +101,15 @@ PBLIF3-MC09/
     └── README
 ```
 
-### Penjelasan File Inti:
-| File | Lokasi | Fungsi & Deskripsi |
-| :--- | :--- | :--- |
-| `platformio.ini` | Root Proyek | Konfigurasi platform Espressif 32, board `esp32doit-devkit-v1`, framework Arduino, kecepatan serial 115200 bps, serta *auto-download library* Adafruit SSD1306 & Adafruit GFX. |
-| `include/config.h` | `include/` | Deklarasi pin hardware I2C (SDA=21, SCL=22), alokasi pin LED (Hijau=25, Kuning=26, Merah=27), konstanta pewaktu non-blocking, serta definisi `SystemState`. |
-| `src/main.cpp` | `src/` | Logika firmware utama yang mengatur alur boot self-test, penerimaan buffer serial UART, perenderan grafis OLED 128x64, dan pengendalian LED multi-state. |
-| `tools/simulate_pi.py` | `tools/` | Skrip Python berbasis `pyserial` untuk menyimulasikan aliran data klasifikasi jamming dari Raspberry Pi / PC ke ESP32 secara interaktif maupun otomatis. |
+### Penjelasan Arsitektur Class OOP:
+| Modul / File | Tipe | Tanggung Jawab & Fungsi |
+| :--- | :---: | :--- |
+| `LedController` (`.h` / `.cpp`) | **Class (Hardware)** | Mengenkapsulasi kendali fisik 3 LED: self-test saat boot, aktivasi LED Hijau solid, LED Merah solid, dan kedip ritmis non-blocking LED Kuning. |
+| `SplashScreen` (`.h` / `.cpp`) | **Class (View)** | Mengelola tata letak grafis OLED saat sistem pertama kali menyala: header proyek `PBLIF3-MC09`, teks `SYSTEM SELF-TEST`, dan `STATUS: OK`. |
+| `NormalStatus` (`.h` / `.cpp`) | **Class (View)** | Mengelola visualisasi kondisi aman pada OLED: judul monitor, kotak status `NORMAL`, teks `Status: Aman`, dan info frekuensi `CH16/AIS : NO NOISE`. |
+| `ConstantJammingStatus` (`.h` / `.cpp`) | **Class (View)** | Mengelola visualisasi bahaya pada OLED: inverted header, teks wajib `PERINGATAN: Constant Jamming`, dan status `SINYAL TERBLOKIR TOTAL`. |
+| `PeriodicJammingStatus` (`.h` / `.cpp`) | **Class (View)** | Mengelola visualisasi waspada pada OLED: teks wajib `PERINGATAN: Periodic Jamming`, pola dot interval, dan keterangan `INTERFERENSI BERKALA`. |
+| `main.cpp` | **Controller** | Bertindak sebagai orkestrator (*System Controller*): membaca perintah serial dari Raspberry Pi, memicu transisi state, dan memanggil method class terkait secara efisien. |
 
 ---
 
