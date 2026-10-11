@@ -4,6 +4,7 @@
 [![Framework](https://img.shields.io/badge/Framework-Arduino-blue.svg?logo=arduino)](https://www.arduino.cc/)
 [![Hardware](https://img.shields.io/badge/Board-ESP32%20DevKit%20V1-red.svg?logo=espressif)](https://www.espressif.com/)
 [![Display](https://img.shields.io/badge/OLED-SSD1306%20128x64%20I2C-lightblue.svg)](https://learn.adafruit.com/monochrome-oled-breakouts)
+[![Safety](https://img.shields.io/badge/Reliability-Task%20Watchdog%20(WDT)-brightgreen.svg)](https://docs.espressif.com/projects/esp-idf/en/latest/esp32/api-reference/system/wdts.html)
 [![Institution](https://img.shields.io/badge/Institusi-Politeknik%20Negeri%20Batam-blue)](https://www.polibatam.ac.id/)
 [![Team](https://img.shields.io/badge/PBL-PBLIF3--MC09-green.svg)](#-identitas-proyek--tim)
 
@@ -17,6 +18,11 @@
 ## 📌 Daftar Isi
 - [🌊 Latar Belakang Proyek](#-latar-belakang-proyek)
 - [✨ Fitur Utama Sistem](#-fitur-utama-sistem)
+- [🛡️ Sistem Keamanan & Auto-Recovery (Watchdog Timer - WDT)](#-sistem-keamanan--auto-recovery-watchdog-timer---wdt)
+  - [1. Urgensi Watchdog pada Sistem Maritim 24/7](#1-urgensi-watchdog-pada-sistem-maritim-247)
+  - [2. Mekanisme Kerja Task Watchdog Timer (TWDT)](#2-mekanisme-kerja-task-watchdog-timer-twdt)
+  - [3. Diagram Alur Siklus Watchdog (ASCII Art)](#3-diagram-alur-siklus-watchdog-ascii-art)
+  - [4. Implementasi Cuplikan Kode Firmware](#4-implementasi-cuplikan-kode-firmware)
 - [📂 Struktur Folder Proyek IoT (Arsitektur OOP Modular)](#-struktur-folder-proyek-iot-arsitektur-oop-modular)
   - [Penjelasan Arsitektur Class OOP](#penjelasan-arsitektur-class-oop)
 - [🛠️ Spesifikasi Perangkat Keras & Wiring](#-spesifikasi-perangkat-keras--wiring)
@@ -34,6 +40,9 @@
   - [Opsi A: Menggunakan PlatformIO (VS Code) - Direkomendasikan](#opsi-a-menggunakan-platformio-vscode---direkomendasikan)
   - [Opsi B: Menggunakan Arduino IDE](#opsi-b-menggunakan-arduino-ide)
 - [🧪 Pengujian & Simulasi Serial](#-pengujian--simulasi-serial)
+  - [1. Uji Manual via Serial Monitor](#1-uji-manual-via-serial-monitor)
+  - [2. Uji Otomatis via Skrip Python](#2-uji-otomatis-via-skrip-python)
+  - [3. Uji Keandalan Watchdog Timer (Simulasi Freeze)](#3-uji-keandalan-watchdog-timer-simulasi-freeze)
 - [👥 Identitas Proyek & Tim](#-identitas-proyek--tim)
 - [📄 Lisensi](#-lisensi)
 
@@ -62,10 +71,122 @@ Perangkat ini dirancang sebagai **unit visualizer portabel mandiri berbasis ESP3
   - 🟡 **Kuning (Berkedip Ritmis)**: Terdeteksi *Periodic Jamming* (Interferensi Berkala).
   - 🔴 **Merah (Solid Bahaya)**: Terdeteksi *Constant Jamming* (Sinyal Terblokir Total).
 - 🖥️ **Antarmuka Grafis OLED 128x64 Piksel**: Menampilkan label status, keterangan dampak sinyal, dan status kanal radio maritim dengan kontras tinggi.
-- ⚡ **Non-Blocking Execution**: Animasi kedip LED dan pembacaan serial menggunakan pewaktu `millis()` sehingga bebas dari `delay()` yang dapat menghambat penerimaan data UART.
+- 🛡️ **Hardware Fail-Safe & Auto-Recovery (Watchdog Timer - WDT)**: Proteksi keandalan perangkat tingkat perangkat keras menggunakan ESP32 Task Watchdog Timer (`esp_task_wdt`). Sistem secara otomatis me-reboot mikrokontroler jika loop program mengalami *deadlock*, *freeze*, atau gangguan bus komunikasi I2C/UART tanpa memerlukan intervensi manusia.
+- ⚡ **Non-Blocking Execution**: Animasi kedip LED dan pembacaan serial menggunakan pewaktu `millis()` sehingga bebas dari `delay()` yang dapat menghambat penerimaan data UART maupun memicu timeout watchdog.
 - 🔌 **Komunikasi Serial UART Standar (115200 bps)**: Format string data sederhana yang kompatibel secara *plug-and-play* dengan Raspberry Pi, mini PC, maupun mikrokontroler lain.
 - 🎮 **Mode Demo Otomatis**: Fitur simulasi mandiri yang dapat diaktifkan lewat perintah `DEMO` untuk mempresentasikan seluruh respon alat secara bergantian tiap 4 detik tanpa komputer utama.
 - 🔋 **Daya Mandiri Portabel (USB 5V)**: Aman dan stabil ditenagai langsung menggunakan *powerbank* DC 5V.
+
+---
+
+## 🛡️ Sistem Keamanan & Auto-Recovery (Watchdog Timer - WDT)
+
+### 1. Urgensi Watchdog pada Sistem Maritim 24/7
+Dalam skenario operasional anjungan kapal laut, perangkat visualizer maritim dituntut untuk bekerja **tanpa henti (24/7 non-stop)** dan memiliki keandalan tinggi (*high availability*). Risiko yang sering terjadi pada mikrokontroler di lapangan meliputi:
+- **Interferensi Gelombang Elektromagnetik (EMI/RFI)** dari radio komunikasi bertenaga besar atau radar kapal yang berpotensi memicu kegagalan bus I2C pada layar OLED (*I2C bus lockup*).
+- **Serial Buffer Overflow** akibat lonjakan data serial tak terduga yang mengunci memori mikrokontroler.
+- **Deadlock / Infinite Loop** pada eksekusi program.
+
+Tanpa mekanisme proteksi, mikrokontroler yang mengalami *freeze* akan menyebabkan status visualizer membeku (*silent failure*). Hal ini sangat berbahaya karena kru kapal mengira situasi sedang normal padahal sistem navigasi sedang diserang *jamming*. 
+
+Fitur **Watchdog Timer (WDT)** hadir sebagai garis pertahanan terakhir (*fail-safe defense*) untuk memastikan perangkat **selalu pulih secara mandiri (*self-healing*)** dalam hitungan detik.
+
+---
+
+### 2. Mekanisme Kerja Task Watchdog Timer (TWDT)
+Pada ESP32, pengamanan diimplementasikan menggunakan **Task Watchdog Timer (TWDT)** bawaan arsitektur ESP-IDF (`esp_task_wdt.h`):
+1. **Konfigurasi Timeout**: Watchdog diatur dengan batas waktu toleransi **5 detik** (`WDT_TIMEOUT_SECONDS = 5`).
+2. **Pendaftaran Task**: Task utama Arduino (`loopTask`) didaftarkan ke pengawasan TWDT (`esp_task_wdt_add(NULL)`).
+3. **Pemberian Makan Watchdog (*Feeding / Petting the Dog*)**: Setiap kali siklus `loop()` berhasil menyelesaikan satu putaran secara normal, fungsi `esp_task_wdt_reset()` dipanggil untuk mereset pewaktu mundur watchdog kembali ke 0.
+4. **Pemicu Panic Reset**: Jika sistem mengalami macet (*hang/stuck*) di suatu proses selama lebih dari 5 detik, pewaktu watchdog mencapai batas waktu (*timeout expired*). Chip ESP32 secara instan memicu **Hardware System Reset**, me-reboot CPU, dan menjalankan ulang rutinitas inisialisasi hardware dari awal (*Splash Screen & Self-Test*).
+
+---
+
+### 3. Diagram Alur Siklus Watchdog (ASCII Art)
+
+```text
+           +---------------------------------------------------+
+           |                 ESP32 Boot / Reset                |
+           +---------------------------------------------------+
+                                     |
+                                     v
+           +---------------------------------------------------+
+           |            Inisialisasi Hardware & TWDT           |
+           |     - esp_task_wdt_init(WDT_TIMEOUT, true)        |
+           |     - esp_task_wdt_add(NULL)                      |
+           +---------------------------------------------------+
+                                     |
+                                     v
+           +---------------------------------------------------+
+           |             Splash Screen & Self-Test             |
+           +---------------------------------------------------+
+                                     |
+                                     v
+        +------> +---------------------------------------------------+
+        |        |               Eksekusi Rutinitas loop()           |
+        |        |  - Parsing data serial dari Raspberry Pi          |
+        |        |  - Pembaruan status OLED & animasi LED millis()   |
+        |        +---------------------------------------------------+
+        |                                  |
+   Loop Normal                             v
+  (Waktu < 5 Detik) +---------------------------------------------------+
+        |           |             "FEED / RESET WATCHDOG"               |
+        |           |              esp_task_wdt_reset()                 |
+        |           +---------------------------------------------------+
+        |                                  |
+        +----------------------------------+
+                                           |
+                                 Jika Terjadi Crash / Hang
+                                  (Waktu >= 5 Detik)
+                                           |
+                                           v
+                        [ 💥 WATCHDOG TIMEOUT EXPIRED! ]
+                                           |
+                                           v
+                        [ 🔄 HARDWARE AUTO-REBOOT TRIGGERED ]
+                                           |
+                                           +----------------------------> (Kembali ke Boot)
+```
+
+---
+
+### 4. Implementasi Cuplikan Kode Firmware
+
+Konfigurasi parameter pada `include/config.h`:
+```cpp
+// ==========================================
+// WATCHDOG TIMER CONFIGURATION
+// ==========================================
+#define WDT_TIMEOUT_SECONDS   5   // Batas waktu timeout sebelum auto-reboot (detik)
+```
+
+Integrasi pada `src/main.cpp`:
+```cpp
+#include <Arduino.h>
+#include <esp_task_wdt.h>
+#include "config.h"
+
+void setup() {
+    Serial.begin(115200);
+
+    // 1. Inisialisasi Task Watchdog Timer (TWDT)
+    // Parameter: timeout dalam detik, panic = true (hardware reboot jika timeout)
+    esp_task_wdt_init(WDT_TIMEOUT_SECONDS, true);
+    esp_task_wdt_add(NULL); // Daftarkan loopTask saat ini ke pengawasan watchdog
+
+    // 2. Inisialisasi hardware (LED, OLED, Self-test)
+    // ...
+}
+
+void loop() {
+    // 3. Reset/Feed Watchdog di setiap siklus loop sehat
+    esp_task_wdt_reset();
+
+    // 4. Proses komunikasi serial & render status OLED/LED (non-blocking)
+    handleSerialInput();
+    updateSystemState();
+}
+```
 
 ---
 
@@ -82,7 +203,7 @@ PBLIF3-MC09/
 │
 ├── include/                       # Header file (.h) - Deklarasi Class & Konfigurasi
 │   ├── README                     # Informasi direktori include PlatformIO
-│   ├── config.h                   # Definisi pin hardware, baudrate, konstanta timing & enum state
+│   ├── config.h                   # Definisi pin hardware, baudrate, timing, parameter WDT & enum state
 │   ├── LedController.h            # Header Class LedController (pengendali 3 LED)
 │   ├── SplashScreen.h             # Header Class SplashScreen (tampilan awal boot)
 │   ├── NormalStatus.h             # Header Class NormalStatus ("Status: Aman")
@@ -95,7 +216,7 @@ PBLIF3-MC09/
 │   ├── NormalStatus.cpp           # Implementasi tampilan OLED status Normal
 │   ├── ConstantJammingStatus.cpp  # Implementasi tampilan OLED status Constant Jamming
 │   ├── PeriodicJammingStatus.cpp  # Implementasi tampilan OLED status Periodic Jamming
-│   └── main.cpp                   # Main program (Orkestrator: inisialisasi class, serial parser, state router)
+│   └── main.cpp                   # Main program (Orkestrator: inisialisasi WDT, feeding loop, serial parser, state router)
 │
 ├── tools/                         # Skrip utilitas pengujian & simulasi
 │   └── simulate_pi.py             # Simulator serial Python (simulasi output Raspberry Pi -> ESP32)
@@ -115,7 +236,7 @@ PBLIF3-MC09/
 | `NormalStatus` (`.h` / `.cpp`) | **Class (View)** | Mengelola visualisasi kondisi aman pada OLED: judul monitor, kotak status `NORMAL`, teks `Status: Aman`, dan info frekuensi `CH16/AIS : NO NOISE`. |
 | `ConstantJammingStatus` (`.h` / `.cpp`) | **Class (View)** | Mengelola visualisasi bahaya pada OLED: inverted header, teks wajib `PERINGATAN: Constant Jamming`, dan status `SINYAL TERBLOKIR TOTAL`. |
 | `PeriodicJammingStatus` (`.h` / `.cpp`) | **Class (View)** | Mengelola visualisasi waspada pada OLED: teks wajib `PERINGATAN: Periodic Jamming`, pola dot interval, dan keterangan `INTERFERENSI BERKALA`. |
-| `main.cpp` | **Controller** | Bertindak sebagai orkestrator (*System Controller*): membaca perintah serial dari Raspberry Pi, memicu transisi state, dan memanggil method class terkait secara efisien. |
+| `main.cpp` | **Controller** | Bertindak sebagai orkestrator (*System Controller*): konfigurasi & feeding *Task Watchdog Timer (WDT)*, membaca perintah serial dari Raspberry Pi, memicu transisi state, dan memanggil method class terkait secara efisien. |
 
 ---
 
@@ -177,7 +298,7 @@ Sistem memiliki **4 kondisi (state)** terprogram:
 
 | No | State Sistem | Masukan Serial UART | Output Layar OLED | Output LED Hijau | Output LED Kuning | Output LED Merah |
 | :---: | :--- | :--- | :--- | :---: | :---: | :---: |
-| **1** | **Splash Screen & Self-Test** | *Saat Boot / Reset / Perintah `TEST`* | Identitas Proyek & Uji Mandiri OK | 💡 **ON** (Tes) | 💡 **ON** (Tes) | 💡 **ON** (Tes) |
+| **1** | **Splash Screen & Self-Test** | *Saat Boot / Reset / Timeout WDT / Perintah `TEST`* | Identitas Proyek & Uji Mandiri OK | 💡 **ON** (Tes) | 💡 **ON** (Tes) | 💡 **ON** (Tes) |
 | **2** | **Status Normal** | `NORMAL` atau `1` | `[ NORMAL ]` - Status: Aman | 🟢 **ON (Solid)** | ⚪ OFF | ⚪ OFF |
 | **3** | **Constant Jamming** | `CONSTANT_JAMMING` atau `2` | `! PERINGATAN BAHAYA !` - Sinyal Terblokir | ⚪ OFF | ⚪ OFF | 🔴 **ON (Solid)** |
 | **4** | **Periodic Jamming** | `PERIODIC_JAMMING` atau `3` | `PERINGATAN WASPADA` - Interferensi Berkala | ⚪ OFF | 🟡 **BLINKING** *(250ms)* | ⚪ OFF |
@@ -185,7 +306,7 @@ Sistem memiliki **4 kondisi (state)** terprogram:
 ---
 
 ### 1. Splash Screen & Self-Test (Pengetesan Awal OLED & LED)
-* **Tujuan**: Menjalankan pengujian fungsionalitas hardware secara mandiri sebelum menerima aliran data serial.
+* **Tujuan**: Menjalankan pengujian fungsionalitas hardware secara mandiri sebelum menerima aliran data serial (juga dijalankan otomatis pasca auto-reboot oleh Watchdog).
 * **Perilaku LED**:
   1. Seluruh LED (Hijau, Kuning, Merah) menyala serentak selama 800 ms (memastikan tidak ada filamen/jalur LED yang putus).
   2. Seluruh LED mati sejenak (200 ms).
@@ -276,6 +397,7 @@ Modul ESP32 menerima data label dari komputer utama (*Raspberry Pi*) melalui ant
 | `CONSTANT_JAMMING` atau `CONSTANT` | `2` | Mengaktifkan Status Constant Jamming (LED Merah ON solid) |
 | `PERIODIC_JAMMING` atau `PERIODIC` | `3` | Mengaktifkan Status Periodic Jamming (LED Kuning kedip 250ms) |
 | `TEST` atau `SPLASH` | `0` | Menjalankan ulang uji mandiri hardware & splash screen |
+| `FREEZE` | `9` | **Simulasi Crash/Hang**: Mengunci loop program untuk memvalidasi interupsi reboot oleh Watchdog Timer |
 | `DEMO` | - | Mengaktifkan/menonaktifkan siklus bergantian status tiap 4 detik |
 | `HELP` | - | Menampilkan daftar perintah valid ke Serial Monitor |
 
@@ -283,7 +405,7 @@ Modul ESP32 menerima data label dari komputer utama (*Raspberry Pi*) melalui ant
 
 ## 🚀 Panduan Instalasi & Menjalankan
 
-### Opsi A: Menggunakan PlatformIO (VSCode) - *Direkomendasikan*
+### Opsi A: Menggunakan PlatformIO (VS Code) - *Direkomendasikan*
 
 1. **Buka Proyek**:
    Buka VS Code, pilih **File -> Open Folder**, arahkan ke:
@@ -306,26 +428,40 @@ Modul ESP32 menerima data label dari komputer utama (*Raspberry Pi*) melalui ant
    - `Adafruit SSD1306`
    - `Adafruit GFX Library`
 3. Salin isi file `src/main.cpp` dan `include/config.h` ke dalam folder sketch Arduino.
-4. Pilih port COM yang terdeteksi, lalu klik **Upload**.
+4. Pastikan include `<esp_task_wdt.h>` tersedia (sudah built-in di Board Core ESP32).
+5. Pilih port COM yang terdeteksi, lalu klik **Upload**.
 
 ---
 
 ## 🧪 Pengujian & Simulasi Serial
 
-1. **Uji Langsung via Serial Monitor**:
-   Buka Serial Monitor (115200 bps), lalu kirim:
-   - `1` $\rightarrow$ Normal (LED Hijau ON)
-   - `2` $\rightarrow$ Constant Jamming (LED Merah ON)
-   - `3` $\rightarrow$ Periodic Jamming (LED Kuning Kedip)
-   - `DEMO` $\rightarrow$ Siklus otomatis bergantian tiap 4 detik
+### 1. Uji Manual via Serial Monitor
+Buka Serial Monitor (115200 bps), lalu kirim:
+- `1` $\rightarrow$ Normal (LED Hijau ON)
+- `2` $\rightarrow$ Constant Jamming (LED Merah ON)
+- `3` $\rightarrow$ Periodic Jamming (LED Kuning Kedip 250ms)
+- `DEMO` $\rightarrow$ Siklus otomatis bergantian tiap 4 detik
 
-2. **Uji Otomatis via Skrip Python**:
-   Jalankan simulator pengirim status:
-   ```bash
-   pip install pyserial
-   python tools/simulate_pi.py
+### 2. Uji Otomatis via Skrip Python
+Jalankan simulator pengirim status:
+```bash
+pip install pyserial
+python tools/simulate_pi.py
+```
+Pilih port COM, lalu gunakan menu interaktif atau opsi simulasi otomatis berkala.
+
+### 3. Uji Keandalan Watchdog Timer (Simulasi Freeze)
+Untuk menguji dan memvalidasi keandalan fitur *Auto-Recovery*:
+1. Buka Serial Monitor PlatformIO pada baudrate `115200`.
+2. Kirim perintah `FREEZE` atau `9`.
+3. Firmware akan dengan sengaja menghentikan *feeding watchdog* (masuk ke infinite blocking loop simulasi).
+4. **Hasil**: Tepat setelah **5 detik**, pesan peringatan panik ESP-IDF akan tercetak di serial:
+   ```text
+   E (XXXXX) task_wdt: Task watchdog got triggered. The following tasks did not reset the watchdog in time:
+   E (XXXXX) task_wdt:  - loopTask (CPU 1)
+   Rebooting...
    ```
-   Pilih port COM, lalu gunakan opsi menu interaktif atau opsi `[5]` untuk simulasi otomatis.
+5. Chip ESP32 seketika melakukan reboot otomatis secara mandiri dan kembali menampilkan **Splash Screen & Self-Test** tanpa perlu menekan tombol fisik reset.
 
 ---
 
