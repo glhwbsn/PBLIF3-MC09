@@ -1,12 +1,13 @@
 /**
  * @file ConstantJammingStatus.h
- * @brief [T-10] Class View — Tampilan OLED status Constant Jamming
+ * @brief [T-11] Class View — Tampilan OLED status Constant Jamming
  *
  * Proyek  : PBLIF3-MC09 — Visualisasi Status Deteksi Jamming Spektrum Maritim
  * Board   : ESP32 DevKit V1
+ * Penanggung Jawab : Muhamad Abid Al Mubarok (NIM: 3312511099)
  *
  * Tanggung jawab:
- *   - Menampilkan peringatan "PERINGATAN: Constant Jamming" pada layar OLED
+ *   - Menampilkan peringatan bahaya Constant Jamming pada layar OLED
  *   - Mengaktifkan LED Merah secara solid (terus-menerus menyala)
  *   - Mematikan LED Hijau dan LED Kuning
  */
