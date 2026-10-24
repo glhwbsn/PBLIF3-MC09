@@ -16,6 +16,7 @@
  * Fitur aktif:
  *   - [T-10] NormalStatus          (Galeh)  ✓
  *   - [T-11] ConstantJammingStatus (Abid)   ✓
+ *   - [T-12] PeriodicJammingStatus (Abid)   ✓
  *   - [T-13] Standby (Waiting)     (Galeh)  ✓
  */
 
@@ -27,6 +28,7 @@
 #include "LedController.h"
 #include "NormalStatus.h"
 #include "ConstantJammingStatus.h"
+#include "PeriodicJammingStatus.h"
 
 // ═══════════════════════════════════════════════════════════════════
 //  OBJEK GLOBAL
@@ -41,6 +43,7 @@ LedController leds;
 /// Objek view — masing-masing menerima referensi display & leds
 NormalStatus           normalStatus(display, leds);
 ConstantJammingStatus  constantStatus(display, leds);
+PeriodicJammingStatus  periodicStatus(display, leds);
 
 // ═══════════════════════════════════════════════════════════════════
 //  VARIABEL STATE & TIMING
@@ -129,6 +132,10 @@ void loop() {
             constantStatus.show();
             break;
 
+        case STATE_PERIODIC_JAMMING:
+            periodicStatus.show();
+            break;
+
         case STATE_WAITING:
         default:
             leds.allOff();
@@ -166,6 +173,11 @@ void processSerialCommand(String cmd) {
     else if (cmd == "CONSTANT" || cmd == "CONSTANT_JAMMING" || cmd == "2") {
         currentState = STATE_CONSTANT_JAMMING;
         Serial.println(F("[STATE] → CONSTANT JAMMING (LED Merah ON)"));
+    }
+    // ── PERIODIC / PERIODIC_JAMMING / 3 ──────────────────────────
+    else if (cmd == "PERIODIC" || cmd == "PERIODIC_JAMMING" || cmd == "3") {
+        currentState = STATE_PERIODIC_JAMMING;
+        Serial.println(F("[STATE] → PERIODIC JAMMING (LED Kuning Kedip)"));
     }
     // ── HELP — Cetak Menu Bantuan ────────────────────────────────
     else if (cmd == "HELP") {
@@ -246,6 +258,8 @@ void printHelp() {
     Serial.println(F("       -> Status Aman (LED Hijau Solid, OLED: Aman)"));
     Serial.println(F("   [2] CONSTANT JAMMING"));
     Serial.println(F("       -> Status Bahaya (LED Merah Solid, OLED: Bahaya)"));
+    Serial.println(F("   [3] PERIODIC JAMMING"));
+    Serial.println(F("       -> Status Waspada (LED Kuning Kedip, OLED: Waspada)"));
     Serial.println(F("   * Tidak ada data serial > 10s otomatis kembali ke STANDBY"));
     Serial.println(F("===================================================="));
     Serial.println();

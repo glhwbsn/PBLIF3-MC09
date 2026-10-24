@@ -81,6 +81,11 @@ void LedController::setConstantJamming() {
 // ═══════════════════════════════════════════════════════════════════
 
 void LedController::setPeriodicJamming() {
+    // Jika sudah dalam mode kedip kuning, pertahankan siklus timer blink
+    if (_isBlinkingYellow) {
+        return;
+    }
+
     digitalWrite(LED_GREEN_PIN, LOW);
     digitalWrite(LED_RED_PIN, LOW);
 
