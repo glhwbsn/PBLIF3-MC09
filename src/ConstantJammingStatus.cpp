@@ -12,15 +12,14 @@
  *   - Mengaktifkan LED Merah secara solid (terus-menerus menyala)
  *   - Memastikan LED Hijau dan LED Kuning dalam keadaan padam
  *
- * Layout OLED 128x64 Piksel:
+ * Layout OLED 128x64 Piksel (Hierarki 4 Zona Vertikal):
  *   +------------------------------+
- *   | ! PERINGATAN BAHAYA !        |  <- Inverted bar (bg putih, teks hitam)
+ *   |    ! PERINGATAN BAHAYA !     |  <- Inverted header bar putih (Y: 0..11)
  *   |                              |
- *   | CONSTANT JAMMING             |  <- Judul status bahaya
- *   | ============================ |  <- Garis pemisah ganda
- *   | SINYAL TERBLOKIR TOTAL       |  <- Keterangan dampak
- *   | Spektrum: Full Noise         |  <- Info level spektrum
- *   | [██████████████████████████] |  <- Bar grafik noise penuh (100%)
+ *   |           BAHAYA!            |  <- Status teks besar size 2 (Y: 18..34)
+ *   |     Sinyal Blokir Total      |  <- Subteks keterangan (Y: 36)
+ *   | ---------------------------- |  <- Garis pemisah bawah (Y: 49)
+ *   |      Noise: 100% Putus       |  <- Info padat (17 char, aman no-wrap) (Y: 54)
  *   +------------------------------+
  *
  * Catatan arsitektur:
@@ -67,36 +66,36 @@ void ConstantJammingStatus::show() {
     // ── 2. Render Grafis OLED (128x64 piksel) ────────────────────
     _display.clearDisplay();
 
-    // ── A. Header Bar Terbalik (Inverted) ────────────────────────
-    // Kotak putih penuh sebagai latar header (Y: 0 s/d 12)
+    // ── A. Header Bar Terbalik (Zona 1 — Y: 0..11) ───────────────
+    // Kotak putih penuh sebagai latar header (Y: 0 s/d 11)
     _display.fillRect(0, 0, SCREEN_WIDTH, 12, SSD1306_WHITE);
     _display.setTextSize(1);
     _display.setTextColor(SSD1306_BLACK, SSD1306_WHITE);  // Teks hitam di atas putih
-    _display.setCursor(6, 2);
+    // "! PERINGATAN BAHAYA !" centered (21 char × 6px = 126px → X = 1)
+    _display.setCursor(1, 2);
     _display.print(F("! PERINGATAN BAHAYA !"));
 
-    // ── B. Judul Status Bahaya ───────────────────────────────────
+    // ── B. Status Utama (Zona 2 — Y: 18..34) ────────────────────
+    // Teks "BAHAYA!" dengan font besar size 2, centered
+    // (7 char × 12px = 84px → X = 22)
     _display.setTextColor(SSD1306_WHITE);  // Kembalikan ke teks putih
+    _display.setTextSize(2);
+    _display.setCursor(22, 18);
+    _display.print(F("BAHAYA!"));
+
+    // ── C. Subteks Keterangan (Zona 3 — Y: 36) ──────────────────
+    // "Sinyal Blokir Total" centered (19 char × 6px = 114px → X = 7)
     _display.setTextSize(1);
-    _display.setCursor(4, 16);
-    _display.print(F("CONSTANT JAMMING"));
+    _display.setCursor(7, 36);
+    _display.print(F("Sinyal Blokir Total"));
 
-    // ── C. Garis Pemisah Ganda (Double Line Separator) ───────────
-    _display.drawFastHLine(0, 26, SCREEN_WIDTH, SSD1306_WHITE);
-    _display.drawFastHLine(0, 28, SCREEN_WIDTH, SSD1306_WHITE);
+    // ── Garis Pemisah Bawah (Y: 49) ─────────────────────────────
+    _display.drawFastHLine(0, 49, SCREEN_WIDTH, SSD1306_WHITE);
 
-    // ── D. Keterangan Dampak & Info Spektrum ─────────────────────
-    _display.setCursor(0, 32);
-    _display.print(F("SINYAL TERBLOKIR TOTAL"));
-
-    _display.setCursor(0, 42);
-    _display.print(F("Spektrum: Full Noise"));
-
-    // ── E. Bar Grafik Noise Level Penuh (100%) ───────────────────
-    // Bingkai luar (outline rectangle)
-    _display.drawRect(0, 53, SCREEN_WIDTH, 9, SSD1306_WHITE);
-    // Isi penuh di dalam bingkai — representasi noise level 100%
-    _display.fillRect(2, 55, SCREEN_WIDTH - 4, 5, SSD1306_WHITE);
+    // ── D. Footer Info Gangguan (Zona 4 — Y: 54) ────────────────
+    // "Noise: 100% Putus" centered (17 char × 6px = 102px → X = 13)
+    _display.setCursor(13, 54);
+    _display.print(F("Noise: 100% Putus"));
 
     // ── 3. Kirim Buffer ke Layar Fisik OLED ──────────────────────
     _display.display();
