@@ -14,6 +14,7 @@
  *   - Mendeteksi timeout serial (>10 detik) → state STANDBY
  *
  * Fitur aktif:
+ *   - [T-09] SplashScreen          (Abid)   ✓
  *   - [T-10] NormalStatus          (Galeh)  ✓
  *   - [T-11] ConstantJammingStatus (Abid)   ✓
  *   - [T-12] PeriodicJammingStatus (Abid)   ✓
@@ -26,6 +27,7 @@
 
 #include "config.h"
 #include "LedController.h"
+#include "SplashScreen.h"
 #include "NormalStatus.h"
 #include "ConstantJammingStatus.h"
 #include "PeriodicJammingStatus.h"
@@ -41,6 +43,7 @@ Adafruit_SSD1306 display(SCREEN_WIDTH, SCREEN_HEIGHT, &Wire, OLED_RESET);
 LedController leds;
 
 /// Objek view — masing-masing menerima referensi display & leds
+SplashScreen           splashScreen(display, leds);
 NormalStatus           normalStatus(display, leds);
 ConstantJammingStatus  constantStatus(display, leds);
 PeriodicJammingStatus  periodicStatus(display, leds);
@@ -90,9 +93,11 @@ void setup() {
     leds.begin();
     Serial.println(F("[OK] LED GPIO 25/26/27 siap"));
 
-    // ── State Awal ───────────────────────────────────────────────
-    currentState   = STATE_WAITING;
+    // ── State Awal: Boot Splash Screen & Self-Test LED [T-09] ────
+    currentState   = STATE_SPLASH;
     lastSerialTime = millis();
+    splashScreen.start();
+    Serial.println(F("[OK] Boot splash screen & self-test LED dimulai"));
 
     Serial.println();
     Serial.println(F("Sistem siap. Ketik HELP untuk daftar perintah."));
@@ -115,7 +120,7 @@ void loop() {
     }
 
     // ── Deteksi Timeout Serial → STANDBY [T-13] ─────────────────
-    if (currentState != STATE_WAITING) {
+    if (currentState != STATE_WAITING && currentState != STATE_SPLASH) {
         if (millis() - lastSerialTime > SERIAL_TIMEOUT_MS) {
             currentState = STATE_WAITING;
             Serial.println(F("[TIMEOUT] Tidak ada data serial > 10 detik → STANDBY"));
@@ -124,6 +129,17 @@ void loop() {
 
     // ── Routing State → Class View ───────────────────────────────
     switch (currentState) {
+        case STATE_SPLASH:
+            splashScreen.update();
+            if (splashScreen.isFinished()) {
+                splashScreen.stop();
+                leds.allOff();
+                currentState   = STATE_WAITING;
+                lastSerialTime = millis();
+                Serial.println(F("[SPLASH] Self-test selesai → STANDBY"));
+            }
+            break;
+
         case STATE_NORMAL:
             normalStatus.show();
             break;
@@ -143,7 +159,7 @@ void loop() {
             break;
     }
 
-    // ── Update Timer Blink LED (non-blocking) ────────────────────
+    // ── Update Timer Self-Test & Blink LED (non-blocking) ────────
     leds.update();
 }
 
@@ -155,7 +171,7 @@ void loop() {
  * @brief Proses perintah string dari Serial UART.
  *
  * Perintah diproses secara case-insensitive setelah trim().
- * Hanya memproses status Normal dan Constant Jamming, serta bantuan.
+ * Mendukung perintah TEST/SPLASH, NORMAL, CONSTANT, PERIODIC, dan HELP.
  */
 void processSerialCommand(String cmd) {
     // Konversi ke uppercase untuk perbandingan case-insensitive
@@ -164,18 +180,27 @@ void processSerialCommand(String cmd) {
     Serial.print(F("[CMD] Diterima: "));
     Serial.println(cmd);
 
+    // ── TEST / SPLASH / 0 — Jalankan Ulang Self-Test & Splash ────
+    if (cmd == "TEST" || cmd == "SPLASH" || cmd == "0") {
+        currentState = STATE_SPLASH;
+        splashScreen.start();
+        Serial.println(F("[STATE] → SPLASH & SELF-TEST LED"));
+    }
     // ── NORMAL / 1 / STATUS:NORMAL ───────────────────────────────
-    if (cmd == "NORMAL" || cmd == "1" || cmd == "STATUS:NORMAL") {
+    else if (cmd == "NORMAL" || cmd == "1" || cmd == "STATUS:NORMAL") {
+        splashScreen.stop();
         currentState = STATE_NORMAL;
         Serial.println(F("[STATE] → NORMAL (LED Hijau ON)"));
     }
     // ── CONSTANT / CONSTANT_JAMMING / 2 ──────────────────────────
     else if (cmd == "CONSTANT" || cmd == "CONSTANT_JAMMING" || cmd == "2") {
+        splashScreen.stop();
         currentState = STATE_CONSTANT_JAMMING;
         Serial.println(F("[STATE] → CONSTANT JAMMING (LED Merah ON)"));
     }
     // ── PERIODIC / PERIODIC_JAMMING / 3 ──────────────────────────
     else if (cmd == "PERIODIC" || cmd == "PERIODIC_JAMMING" || cmd == "3") {
+        splashScreen.stop();
         currentState = STATE_PERIODIC_JAMMING;
         Serial.println(F("[STATE] → PERIODIC JAMMING (LED Kuning Kedip)"));
     }
@@ -254,6 +279,8 @@ void printHelp() {
     Serial.println();
     Serial.println(F("===================================================="));
     Serial.println(F(" PILIHAN FITUR STATUS:"));
+    Serial.println(F("   [0] TEST / SPLASH"));
+    Serial.println(F("       -> Jalankan Ulang Self-Test LED & Splash Screen"));
     Serial.println(F("   [1] NORMAL"));
     Serial.println(F("       -> Status Aman (LED Hijau Solid, OLED: Aman)"));
     Serial.println(F("   [2] CONSTANT JAMMING"));
