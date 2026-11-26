@@ -21,7 +21,9 @@
 LedController::LedController()
     : _isBlinkingYellow(false),
       _yellowState(false),
-      _lastBlinkTime(0) {
+      _lastBlinkTime(0),
+      _isSelfTesting(false),
+      _selfTestStartTime(0) {
 }
 
 // ═══════════════════════════════════════════════════════════════════
@@ -52,11 +54,28 @@ void LedController::selfTest() {
     allOff();
 }
 
+void LedController::startSelfTest() {
+    _isBlinkingYellow = false;
+    _yellowState = false;
+    _isSelfTesting = true;
+    _selfTestStartTime = millis();
+
+    // Nyalakan ketiga LED serentak secara non-blocking
+    digitalWrite(LED_GREEN_PIN, HIGH);
+    digitalWrite(LED_YELLOW_PIN, HIGH);
+    digitalWrite(LED_RED_PIN, HIGH);
+}
+
+bool LedController::isSelfTesting() const {
+    return _isSelfTesting;
+}
+
 // ═══════════════════════════════════════════════════════════════════
 //  [T-10] Status Normal / Aman — LED Hijau Solid
 // ═══════════════════════════════════════════════════════════════════
 
 void LedController::setNormal() {
+    _isSelfTesting = false;
     _isBlinkingYellow = false;
 
     digitalWrite(LED_GREEN_PIN, HIGH);
@@ -69,6 +88,7 @@ void LedController::setNormal() {
 // ═══════════════════════════════════════════════════════════════════
 
 void LedController::setConstantJamming() {
+    _isSelfTesting = false;
     _isBlinkingYellow = false;
 
     digitalWrite(LED_GREEN_PIN, LOW);
@@ -81,6 +101,8 @@ void LedController::setConstantJamming() {
 // ═══════════════════════════════════════════════════════════════════
 
 void LedController::setPeriodicJamming() {
+    _isSelfTesting = false;
+
     // Jika sudah dalam mode kedip kuning, pertahankan siklus timer blink
     if (_isBlinkingYellow) {
         return;
@@ -103,6 +125,7 @@ void LedController::setPeriodicJamming() {
 // ═══════════════════════════════════════════════════════════════════
 
 void LedController::allOff() {
+    _isSelfTesting = false;
     _isBlinkingYellow = false;
 
     digitalWrite(LED_GREEN_PIN, LOW);
@@ -111,15 +134,23 @@ void LedController::allOff() {
 }
 
 // ═══════════════════════════════════════════════════════════════════
-//  Engine Non-Blocking Blink (Wajib dipanggil di loop())
+//  Engine Non-Blocking Self-Test & Blink (Wajib dipanggil di loop())
 // ═══════════════════════════════════════════════════════════════════
 
 void LedController::update() {
+    unsigned long currentMillis = millis();
+
+    // [T-09] Selesaikan self-test non-blocking setelah LED_SELFTEST_DURATION_MS
+    if (_isSelfTesting) {
+        if (currentMillis - _selfTestStartTime >= LED_SELFTEST_DURATION_MS) {
+            allOff();
+        }
+        return;
+    }
+
     if (!_isBlinkingYellow) {
         return;  // Tidak ada kedipan aktif, langsung keluar
     }
-
-    unsigned long currentMillis = millis();
 
     if (currentMillis - _lastBlinkTime >= PERIODIC_BLINK_INTERVAL) {
         _lastBlinkTime = currentMillis;

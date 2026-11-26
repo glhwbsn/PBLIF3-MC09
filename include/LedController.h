@@ -49,6 +49,21 @@ public:
     void selfTest();
 
     /**
+     * @brief [T-09] Mulai self-test seluruh LED secara non-blocking.
+     *
+     * Menyalakan LED Hijau, Kuning, dan Merah serentak; pemadaman otomatis
+     * ditangani di update() setelah LED_SELFTEST_DURATION_MS berlalu.
+     * Aman dipanggil baik di setup() maupun di loop().
+     */
+    void startSelfTest();
+
+    /**
+     * @brief Cek apakah prosedur self-test non-blocking masih berlangsung.
+     * @return true jika seluruh LED sedang menyala dalam fase self-test.
+     */
+    bool isSelfTesting() const;
+
+    /**
      * @brief [T-10] Atur LED ke kondisi status Normal / Aman.
      *
      * LED Hijau ON (solid), LED Kuning OFF, LED Merah OFF.
@@ -79,11 +94,10 @@ public:
     void allOff();
 
     /**
-     * @brief Rutinitas non-blocking untuk menggerakkan kedipan LED Kuning.
+     * @brief Rutinitas non-blocking untuk self-test LED dan kedipan LED Kuning.
      *
-     * Wajib dipanggil di setiap siklus loop(). Hanya melakukan toggle pin
-     * LED Kuning jika mode blink aktif dan interval waktu sudah tercapai.
-     * Aman dipanggil kapan saja — tidak melakukan apa-apa jika blink tidak aktif.
+     * Wajib dipanggil di setiap siklus loop(). Menangani pemadaman otomatis
+     * setelah fase self-test berakhir serta toggle LED Kuning saat mode blink aktif.
      */
     void update();
 
@@ -91,6 +105,8 @@ private:
     bool          _isBlinkingYellow;   ///< Flag apakah mode kedip kuning sedang aktif
     bool          _yellowState;        ///< Status fisik pin kuning saat kedip (HIGH/LOW)
     unsigned long _lastBlinkTime;      ///< Timestamp millis() terakhir untuk interval blink
+    bool          _isSelfTesting;      ///< Flag apakah self-test LED non-blocking sedang aktif
+    unsigned long _selfTestStartTime;  ///< Timestamp millis() saat self-test LED dimulai
 };
 
 #endif // LED_CONTROLLER_H
