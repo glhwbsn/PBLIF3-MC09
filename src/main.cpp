@@ -1,29 +1,8 @@
-/**
- * @file main.cpp
- * @brief [T-13] System Controller — Orkestrator utama firmware ESP32
- *
- * Proyek  : PBLIF3-MC09 — Visualisasi Status Deteksi Jamming Spektrum Maritim
- * Board   : ESP32 DevKit V1 (esp32doit-devkit-v1)
- *
- * Penanggung Jawab : Galeh Wibisono (NIM: 3312511092)
- *
- * Tanggung jawab modul ini:
- *   - Inisialisasi seluruh hardware (Serial, I2C, OLED, LED)
- *   - Menerima dan memparsing perintah serial UART dari host
- *   - Merutekan state sistem ke class view (Normal, Constant, Standby)
- *   - Mendeteksi timeout serial (>10 detik) → state STANDBY
- *
- * Fitur aktif:
- *   - [T-09] SplashScreen          (Abid)   ✓
- *   - [T-10] NormalStatus          (Galeh)  ✓
- *   - [T-11] ConstantJammingStatus (Abid)   ✓
- *   - [T-12] PeriodicJammingStatus (Abid)   ✓
- *   - [T-13] Standby (Waiting)     (Galeh)  ✓
- */
-
 #include <Wire.h>
 #include <Adafruit_GFX.h>
 #include <Adafruit_SSD1306.h>
+#include <esp_system.h>
+#include <esp_task_wdt.h>
 
 #include "config.h"
 #include "LedController.h"
@@ -49,19 +28,27 @@ ConstantJammingStatus  constantStatus(display, leds);
 PeriodicJammingStatus  periodicStatus(display, leds);
 
 // ═══════════════════════════════════════════════════════════════════
-//  VARIABEL STATE & TIMING
+//  VARIABEL STATE, WATCHDOG & SERIAL NON-BLOCKING
 // ═══════════════════════════════════════════════════════════════════
 
-SystemState   currentState     = STATE_WAITING;  ///< State aktif saat ini
-unsigned long lastSerialTime   = 0;              ///< Timestamp data serial terakhir diterima
+SystemState   currentState   = STATE_WAITING;  ///< State aktif saat ini
+unsigned long lastSerialTime = 0;              ///< Timestamp data serial valid terakhir
+
+static const size_t SERIAL_BUFFER_MAX = 64;
+char   serialBuffer[SERIAL_BUFFER_MAX];
+size_t serialBufferIndex = 0;
 
 // ═══════════════════════════════════════════════════════════════════
 //  PROTOTIPE FUNGSI
 // ═══════════════════════════════════════════════════════════════════
 
+void initWatchdog();
+void applyState(SystemState newState, bool forceRender = false);
+void handleSerialInput();
+void handleSerialTimeout();
 void processSerialCommand(String cmd);
+void triggerWatchdogFreezeTest();
 void renderWaitingScreen();
-void printHelp();
 
 // ═══════════════════════════════════════════════════════════════════
 //  SETUP — INISIALISASI HARDWARE & SUBSISTEM
@@ -78,13 +65,17 @@ void setup() {
     Serial.println(F("  Spektrum Maritim — ESP32 DevKit V1"));
     Serial.println(F("══════════════════════════════════════════"));
 
+    if (esp_reset_reason() == ESP_RST_TASK_WDT) {
+        Serial.println(F("[RECOVERY] Sistem pulih otomatis dari Task Watchdog Reset!"));
+    }
+
     // ── I2C & OLED SSD1306 ───────────────────────────────────────
     Wire.begin(OLED_SDA_PIN, OLED_SCL_PIN);
 
     if (!display.begin(SSD1306_SWITCHCAPVCC, OLED_ADDRESS)) {
         Serial.println(F("[ERROR] OLED SSD1306 gagal inisialisasi!"));
         Serial.println(F("[ERROR] Periksa koneksi I2C (SDA/SCL) dan alamat 0x3C."));
-        // Loop selamanya — tanpa OLED, sistem tidak berguna
+        // Berhenti sebelum WDT diaktifkan agar pesan galat tetap terbaca tanpa reboot loop
         while (true) { delay(1000); }
     }
     Serial.println(F("[OK] OLED SSD1306 terdeteksi pada 0x3C"));
@@ -93,14 +84,18 @@ void setup() {
     leds.begin();
     Serial.println(F("[OK] LED GPIO 25/26/27 siap"));
 
+    // ── Task Watchdog Timer (TWDT) [T-13] ────────────────────────
+    initWatchdog();
+
     // ── State Awal: Boot Splash Screen & Self-Test LED [T-09] ────
-    currentState   = STATE_SPLASH;
     lastSerialTime = millis();
-    splashScreen.start();
+    applyState(STATE_SPLASH, true);
     Serial.println(F("[OK] Boot splash screen & self-test LED dimulai"));
 
+    esp_task_wdt_reset();
+
     Serial.println();
-    Serial.println(F("Sistem siap. Ketik HELP untuk daftar perintah."));
+    Serial.println(F("Sistem siap. Perintah: NORMAL, CONSTANT, PERIODIC, FREEZE."));
     Serial.println(F("──────────────────────────────────────────"));
 }
 
@@ -109,35 +104,71 @@ void setup() {
 // ═══════════════════════════════════════════════════════════════════
 
 void loop() {
-    // ── Baca & Proses Perintah Serial ────────────────────────────
-    if (Serial.available()) {
-        String cmd = Serial.readStringUntil('\n');
-        cmd.trim();
-        if (cmd.length() > 0) {
+    // ── Feed Task Watchdog Timer di setiap siklus sehat [T-13] ───
+    esp_task_wdt_reset();
+
+    // ── Baca & Proses Perintah Serial Non-Blocking ───────────────
+    handleSerialInput();
+
+    // ── Deteksi Timeout Serial → STANDBY [T-13] ──────────────────
+    handleSerialTimeout();
+
+    // ── Update Timer Self-Test & Blink LED (non-blocking) ────────
+    leds.update();
+
+    // ── Update Progres Splash Screen Non-Blocking [T-09] ─────────
+    if (currentState == STATE_SPLASH) {
+        splashScreen.update();
+        if (splashScreen.isFinished()) {
             lastSerialTime = millis();
-            processSerialCommand(cmd);
+            applyState(STATE_WAITING);
+            Serial.println(F("[SPLASH] Self-test selesai → STANDBY"));
+        }
+    }
+}
+
+// ═══════════════════════════════════════════════════════════════════
+//  INISIALISASI WATCHDOG & STATE ROUTING [T-13]
+// ═══════════════════════════════════════════════════════════════════
+
+/**
+ * @brief Konfigurasi hardware Task Watchdog Timer (TWDT) untuk loopTask.
+ */
+void initWatchdog() {
+    esp_err_t initErr = esp_task_wdt_init(WDT_TIMEOUT_SECONDS, true);
+    if (initErr != ESP_OK) {
+        Serial.printf("[WARN] TWDT init gagal (err=0x%x)\n", initErr);
+        return;
+    }
+
+    if (esp_task_wdt_status(NULL) != ESP_OK) {
+        esp_err_t addErr = esp_task_wdt_add(NULL);
+        if (addErr != ESP_OK) {
+            Serial.printf("[WARN] TWDT subscribe loopTask gagal (err=0x%x)\n", addErr);
+            return;
         }
     }
 
-    // ── Deteksi Timeout Serial → STANDBY [T-13] ─────────────────
-    if (currentState != STATE_WAITING && currentState != STATE_SPLASH) {
-        if (millis() - lastSerialTime > SERIAL_TIMEOUT_MS) {
-            currentState = STATE_WAITING;
-            Serial.println(F("[TIMEOUT] Tidak ada data serial > 10 detik → STANDBY"));
-        }
+    Serial.printf("[OK] Task Watchdog Timer (TWDT) aktif (%d detik)\n", WDT_TIMEOUT_SECONDS);
+}
+
+/**
+ * @brief Terapkan transisi state dan render OLED hanya saat state berubah.
+ */
+void applyState(SystemState newState, bool forceRender) {
+    if (newState == currentState && !forceRender) {
+        return;
     }
 
-    // ── Routing State → Class View ───────────────────────────────
+    if (currentState == STATE_SPLASH && newState != STATE_SPLASH) {
+        splashScreen.stop();
+    }
+
+    currentState = newState;
+
     switch (currentState) {
         case STATE_SPLASH:
-            splashScreen.update();
-            if (splashScreen.isFinished()) {
-                splashScreen.stop();
-                leds.allOff();
-                currentState   = STATE_WAITING;
-                lastSerialTime = millis();
-                Serial.println(F("[SPLASH] Self-test selesai → STANDBY"));
-            }
+            splashScreen.start();
             break;
 
         case STATE_NORMAL:
@@ -158,61 +189,109 @@ void loop() {
             renderWaitingScreen();
             break;
     }
-
-    // ── Update Timer Self-Test & Blink LED (non-blocking) ────────
-    leds.update();
 }
 
 // ═══════════════════════════════════════════════════════════════════
-//  PARSER PERINTAH SERIAL UART
+//  PENANGANAN SERIAL & TIMEOUT NON-BLOCKING
 // ═══════════════════════════════════════════════════════════════════
 
 /**
- * @brief Proses perintah string dari Serial UART.
- *
- * Perintah diproses secara case-insensitive setelah trim().
- * Mendukung perintah TEST/SPLASH, NORMAL, CONSTANT, PERIODIC, dan HELP.
+ * @brief Baca stream serial per byte tanpa blocking hingga newline/CR.
+ */
+void handleSerialInput() {
+    while (Serial.available() > 0) {
+        char c = static_cast<char>(Serial.read());
+
+        if (c == '\n' || c == '\r') {
+            if (serialBufferIndex == 0) {
+                continue;
+            }
+
+            serialBuffer[serialBufferIndex] = '\0';
+            serialBufferIndex = 0;
+
+            String cmd(serialBuffer);
+            cmd.trim();
+            if (cmd.length() > 0) {
+                processSerialCommand(cmd);
+            }
+            return;  // Batasi satu perintah per loop agar watchdog & LED tetap tepat waktu
+        }
+
+        if (serialBufferIndex < SERIAL_BUFFER_MAX - 1) {
+            serialBuffer[serialBufferIndex++] = c;
+        }
+    }
+}
+
+/**
+ * @brief Pindahkan sistem ke STANDBY bila tidak ada perintah valid > SERIAL_TIMEOUT_MS.
+ */
+void handleSerialTimeout() {
+    if (currentState == STATE_WAITING || currentState == STATE_SPLASH) {
+        return;
+    }
+
+    if (millis() - lastSerialTime > SERIAL_TIMEOUT_MS) {
+        applyState(STATE_WAITING);
+        Serial.printf("[TIMEOUT] Tidak ada data valid > %lu detik → STANDBY\n",
+                      static_cast<unsigned long>(SERIAL_TIMEOUT_MS / 1000));
+    }
+}
+
+// ═══════════════════════════════════════════════════════════════════
+//  PARSER PERINTAH SERIAL UART & UJI FAIL-SAFE
+// ═══════════════════════════════════════════════════════════════════
+
+/**
+ * @brief Proses perintah string dari Serial UART (case-insensitive).
  */
 void processSerialCommand(String cmd) {
-    // Konversi ke uppercase untuk perbandingan case-insensitive
     cmd.toUpperCase();
 
     Serial.print(F("[CMD] Diterima: "));
     Serial.println(cmd);
 
-    // ── TEST / SPLASH / 0 — Jalankan Ulang Self-Test & Splash ────
-    if (cmd == "TEST" || cmd == "SPLASH" || cmd == "0") {
-        currentState = STATE_SPLASH;
-        splashScreen.start();
-        Serial.println(F("[STATE] → SPLASH & SELF-TEST LED"));
-    }
     // ── NORMAL / 1 / STATUS:NORMAL ───────────────────────────────
-    else if (cmd == "NORMAL" || cmd == "1" || cmd == "STATUS:NORMAL") {
-        splashScreen.stop();
-        currentState = STATE_NORMAL;
+    if (cmd == "NORMAL" || cmd == "1" || cmd == "STATUS:NORMAL") {
+        lastSerialTime = millis();
+        applyState(STATE_NORMAL);
         Serial.println(F("[STATE] → NORMAL (LED Hijau ON)"));
     }
     // ── CONSTANT / CONSTANT_JAMMING / 2 ──────────────────────────
     else if (cmd == "CONSTANT" || cmd == "CONSTANT_JAMMING" || cmd == "2") {
-        splashScreen.stop();
-        currentState = STATE_CONSTANT_JAMMING;
+        lastSerialTime = millis();
+        applyState(STATE_CONSTANT_JAMMING);
         Serial.println(F("[STATE] → CONSTANT JAMMING (LED Merah ON)"));
     }
     // ── PERIODIC / PERIODIC_JAMMING / 3 ──────────────────────────
     else if (cmd == "PERIODIC" || cmd == "PERIODIC_JAMMING" || cmd == "3") {
-        splashScreen.stop();
-        currentState = STATE_PERIODIC_JAMMING;
+        lastSerialTime = millis();
+        applyState(STATE_PERIODIC_JAMMING);
         Serial.println(F("[STATE] → PERIODIC JAMMING (LED Kuning Kedip)"));
     }
-    // ── HELP — Cetak Menu Bantuan ────────────────────────────────
-    else if (cmd == "HELP") {
-        printHelp();
+    // ── FREEZE / 9 — Simulasi Hang untuk Uji Auto-Reboot TWDT ────
+    else if (cmd == "FREEZE" || cmd == "9") {
+        triggerWatchdogFreezeTest();
     }
     // ── Perintah Tidak Dikenal ───────────────────────────────────
     else {
         Serial.print(F("[?] Perintah tidak dikenal: "));
         Serial.println(cmd);
-        Serial.println(F("    Ketik HELP untuk daftar perintah."));
+        Serial.println(F("    Perintah valid: NORMAL, CONSTANT, PERIODIC, FREEZE."));
+    }
+}
+
+/**
+ * @brief Mengunci loopTask tanpa feed watchdog untuk membuktikan auto-reboot TWDT.
+ */
+void triggerWatchdogFreezeTest() {
+    Serial.println(F("[TEST] Simulasi FREEZE aktif! Feeding watchdog dihentikan."));
+    Serial.printf("[TEST] TWDT akan memicu hardware reboot dalam %d detik...\n", WDT_TIMEOUT_SECONDS);
+    Serial.flush();
+
+    while (true) {
+        delay(100);  // Menahan loopTask tanpa memanggil esp_task_wdt_reset()
     }
 }
 
@@ -220,20 +299,6 @@ void processSerialCommand(String cmd) {
 //  RENDER LAYAR STANDBY / MENUNGGU SINYAL [T-13]
 // ═══════════════════════════════════════════════════════════════════
 
-/**
- * @brief Tampilkan layar "Standby / Belum Dipindai" pada OLED.
- *
- * Layout sesuai spesifikasi AGENTS.md §5.C.5:
- *   +------------------------------+
- *   |       SPEKTRUM MARITIM       |  <- Header sistem (Y: 2)
- *   | ---------------------------- |  <- Garis pemisah atas (Y: 12)
- *   |                              |
- *   |           STANDBY            |  <- Status teks besar size 2 (Y: 18..34)
- *   |    Sinyal Belum Dipindai     |  <- Subteks keterangan (Y: 36)
- *   | ---------------------------- |  <- Garis pemisah bawah (Y: 49)
- *   |      Menunggu Data Host      |  <- Panduan tindakan operator (Y: 54)
- *   +------------------------------+
- */
 void renderWaitingScreen() {
     display.clearDisplay();
 
@@ -269,25 +334,4 @@ void renderWaitingScreen() {
 
     // ── Kirim Buffer ke Layar Fisik OLED ─────────────────────────
     display.display();
-}
-
-// ═══════════════════════════════════════════════════════════════════
-//  CETAK MENU BANTUAN KE SERIAL MONITOR
-// ═══════════════════════════════════════════════════════════════════
-
-void printHelp() {
-    Serial.println();
-    Serial.println(F("===================================================="));
-    Serial.println(F(" PILIHAN FITUR STATUS:"));
-    Serial.println(F("   [0] TEST / SPLASH"));
-    Serial.println(F("       -> Jalankan Ulang Self-Test LED & Splash Screen"));
-    Serial.println(F("   [1] NORMAL"));
-    Serial.println(F("       -> Status Aman (LED Hijau Solid, OLED: Aman)"));
-    Serial.println(F("   [2] CONSTANT JAMMING"));
-    Serial.println(F("       -> Status Bahaya (LED Merah Solid, OLED: Bahaya)"));
-    Serial.println(F("   [3] PERIODIC JAMMING"));
-    Serial.println(F("       -> Status Waspada (LED Kuning Kedip, OLED: Waspada)"));
-    Serial.println(F("   * Tidak ada data serial > 10s otomatis kembali ke STANDBY"));
-    Serial.println(F("===================================================="));
-    Serial.println();
 }
